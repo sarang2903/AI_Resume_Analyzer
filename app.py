@@ -11,7 +11,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="AI Resume Analyzer Pro+", layout="wide")
 
-# ---------------- THEME TOGGLE ----------------
+# ---------------- THEME ----------------
 theme = st.sidebar.toggle("🌙 Dark Mode")
 
 if theme:
@@ -36,25 +36,35 @@ def extract_text(file):
                 text += page.extract_text() + " "
     return text.lower()
 
+# -------- CONTACT INFO --------
 def extract_email(text):
     match = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+    return match[0] if match else "Not Found"
+
+def extract_phone(text):
+    match = re.findall(r"\+?\d[\d\s\-]{8,15}\d", text)
+    return match[0] if match else "Not Found"
+
+def extract_linkedin(text):
+    match = re.findall(r"(https?://(?:www\.)?linkedin\.com/[^\s]+)", text)
+    return match[0] if match else "Not Found"
+
+def extract_github(text):
+    match = re.findall(r"(https?://(?:www\.)?github\.com/[^\s]+)", text)
     return match[0] if match else "Not Found"
 
 def extract_name(text):
     lines = text.split("\n")
     for line in lines:
-        if len(line.split()) <= 4:
-            return line
+        if 2 <= len(line.split()) <= 4:
+            return line.strip()
     return "Not Found"
 
+# -------- SKILLS --------
 def extract_skills(text):
     return list(set([s for s in skills_list if s in text]))
 
-# 🤖 Smart Score
-def smart_score(skills, match):
-    return min(int(len(skills)*4 + match*0.6), 100)
-
-# 🎯 Match + keywords
+# -------- MATCH + AI SCORE --------
 def match_analysis(resume, jd):
     cv = CountVectorizer()
     matrix = cv.fit_transform([resume, jd])
@@ -66,15 +76,21 @@ def match_analysis(resume, jd):
 
     return round(similarity*100,2), matched
 
-# 📄 PDF Report
-def generate_pdf(name, email, score):
+def smart_score(skills, match):
+    return min(int(len(skills)*4 + match*0.6), 100)
+
+# -------- PDF REPORT --------
+def generate_pdf(name, email, phone, linkedin, github, score):
     doc = SimpleDocTemplate("report.pdf")
     styles = getSampleStyleSheet()
     content = []
 
     content.append(Paragraph(f"Name: {name}", styles["Normal"]))
     content.append(Paragraph(f"Email: {email}", styles["Normal"]))
-    content.append(Paragraph(f"Score: {score}", styles["Normal"]))
+    content.append(Paragraph(f"Phone: {phone}", styles["Normal"]))
+    content.append(Paragraph(f"LinkedIn: {linkedin}", styles["Normal"]))
+    content.append(Paragraph(f"GitHub: {github}", styles["Normal"]))
+    content.append(Paragraph(f"AI Score: {score}", styles["Normal"]))
 
     doc.build(content)
 
@@ -93,37 +109,49 @@ if file:
 
     name = extract_name(text)
     email = extract_email(text)
-    skills = extract_skills(text)
+    phone = extract_phone(text)
+    linkedin = extract_linkedin(text)
+    github = extract_github(text)
 
+    skills = extract_skills(text)
     match, keywords = match_analysis(text, jd if jd else "")
     score = smart_score(skills, match)
 
-    # ---------------- METRICS ----------------
+    # -------- METRICS --------
     c1, c2, c3 = st.columns(3)
     c1.metric("🤖 AI Score", f"{score}/100")
     c2.metric("🎯 JD Match", f"{match}%")
     c3.metric("💡 Skills", len(skills))
 
-    # ---------------- INFO ----------------
-    st.subheader("👤 Candidate Info")
-    st.write("Name:", name)
-    st.write("Email:", email)
+    # -------- CONTACT INFO --------
+    st.subheader("👤 Candidate Contact Information")
 
-    # ---------------- SKILLS ----------------
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("📛 **Name:**", name)
+        st.write("📧 **Email:**", email)
+        st.write("📱 **Phone:**", phone)
+
+    with col2:
+        st.write("🔗 **LinkedIn:**", linkedin)
+        st.write("💻 **GitHub:**", github)
+
+    # -------- SKILLS --------
     st.subheader("🛠 Skills Found")
     st.write(skills)
 
-    # ---------------- CHART ----------------
+    # -------- CHART --------
     st.subheader("📊 Skill Distribution")
     df = pd.DataFrame({"Skill": skills, "Value":[1]*len(skills)})
     fig = px.bar(df, x="Skill", y="Value")
     st.plotly_chart(fig)
 
-    # ---------------- MATCH ANALYSIS ----------------
+    # -------- MATCH KEYWORDS --------
     st.subheader("🎯 Matching Keywords")
     st.write(keywords[:20])
 
-    # ---------------- SUGGESTIONS ----------------
+    # -------- SUGGESTIONS --------
     st.subheader("📌 Smart Suggestions")
 
     if score < 50:
@@ -132,9 +160,11 @@ if file:
         st.warning("Customize resume based on job description")
     if "machine learning" not in skills:
         st.info("Add Machine Learning skills")
+    if "communication" not in skills:
+        st.info("Add communication skills")
 
-    # ---------------- PDF DOWNLOAD ----------------
-    generate_pdf(name, email, score)
+    # -------- PDF DOWNLOAD --------
+    generate_pdf(name, email, phone, linkedin, github, score)
 
     with open("report.pdf", "rb") as f:
         st.download_button("📄 Download PDF Report", f, "report.pdf")
