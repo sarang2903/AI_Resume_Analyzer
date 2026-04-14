@@ -1,11 +1,29 @@
 import streamlit as st
 import pdfplumber
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import pandas as pd
 
+# Page config
 st.set_page_config(page_title="AI Resume Analyzer", layout="wide")
 
-st.title("🧠 AI Resume Analyzer")
+# Custom CSS (UI improvement)
+st.markdown("""
+    <style>
+    .main {background-color: #f5f7fa;}
+    .stButton>button {
+        background-color: #4CAF50;
+        color: white;
+        border-radius: 10px;
+        height: 3em;
+        width: 100%;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# ✅ Skills list directly in code (no file needed)
+st.title("🧠 AI Resume Analyzer Dashboard")
+
+# Skills list
 skills_list = [
     "python", "java", "c++", "machine learning", "data science",
     "sql", "html", "css", "javascript", "react", "node",
@@ -13,7 +31,7 @@ skills_list = [
     "communication", "teamwork"
 ]
 
-# Extract text from PDF
+# Extract text
 def extract_text(pdf_file):
     text = ""
     with pdfplumber.open(pdf_file) as pdf:
@@ -24,65 +42,88 @@ def extract_text(pdf_file):
 
 # Extract skills
 def extract_skills(text):
-    found_skills = []
-    for skill in skills_list:
-        if skill in text:
-            found_skills.append(skill)
-    return list(set(found_skills))
+    return list(set([skill for skill in skills_list if skill in text]))
 
 # ATS Score
 def ats_score(text, skills):
-    score = 0
-
-    # Skill score
-    score += len(skills) * 5
-
-    # Keyword score
+    score = len(skills) * 5
     keywords = ["project", "experience", "education", "skills"]
     for word in keywords:
         if word in text:
             score += 5
-
     return min(score, 100)
 
+# Resume vs JD Match
+def match_score(resume, jd):
+    cv = CountVectorizer()
+    matrix = cv.fit_transform([resume, jd])
+    similarity = cosine_similarity(matrix)[0][1]
+    return round(similarity * 100, 2)
+
 # Suggestions
-def give_suggestions(score, skills):
-    suggestions = []
-
+def suggestions(score, skills):
+    tips = []
     if score < 50:
-        suggestions.append("Add more relevant skills.")
-        suggestions.append("Include projects and experience.")
-
+        tips.append("Add more relevant technical skills.")
+        tips.append("Include projects and work experience.")
     if "machine learning" not in skills:
-        suggestions.append("Consider adding Machine Learning skills.")
-
+        tips.append("Add Machine Learning for better opportunities.")
     if "communication" not in skills:
-        suggestions.append("Add soft skills like communication.")
+        tips.append("Include soft skills like communication.")
+    return tips
 
-    return suggestions
+# Layout
+col1, col2 = st.columns(2)
 
-# Upload PDF
-uploaded_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
+with col1:
+    uploaded_file = st.file_uploader("📄 Upload Resume (PDF)", type=["pdf"])
+
+with col2:
+    jd_input = st.text_area("📝 Paste Job Description")
 
 if uploaded_file:
     text = extract_text(uploaded_file)
 
-    st.subheader("📄 Extracted Resume Text")
-    st.write(text[:1000])
+    st.subheader("📄 Resume Preview")
+    st.write(text[:800])
 
     skills = extract_skills(text)
 
-    st.subheader("💡 Skills Found")
-    st.write(skills)
+    # Dashboard layout
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.metric("💡 Skills Found", len(skills))
 
     score = ats_score(text, skills)
 
-    st.subheader("📊 ATS Score")
-    st.progress(score)
-    st.write(f"{score}/100")
+    with c2:
+        st.metric("📊 ATS Score", f"{score}/100")
 
-    suggestions = give_suggestions(score, skills)
+    if jd_input:
+        match = match_score(text, jd_input)
+    else:
+        match = 0
 
+    with c3:
+        st.metric("🎯 JD Match %", f"{match}%")
+
+    # Skills Display
+    st.subheader("🛠 Skills Detected")
+    st.write(skills)
+
+    # Suggestions
     st.subheader("📌 Suggestions")
-    for s in suggestions:
-        st.write("✔️", s)
+    for tip in suggestions(score, skills):
+        st.write("✔️", tip)
+
+    # Report Data
+    report = pd.DataFrame({
+        "Metric": ["Skills Found", "ATS Score", "JD Match"],
+        "Value": [len(skills), score, match]
+    })
+
+    # Download button
+    st.subheader("⬇️ Download Report")
+    csv = report.to_csv(index=False).encode('utf-8')
+    st.download_button("Download CSV Report", csv, "report.csv", "text/csv")
