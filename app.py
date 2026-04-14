@@ -7,18 +7,38 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
+from openai import OpenAI
 
 # ---------------- CONFIG ----------------
-st.set_page_config(page_title="AI Resume Analyzer Pro+", layout="wide")
+st.set_page_config(page_title="AI Resume Analyzer Ultimate", layout="wide")
 
-# ---------------- THEME TOGGLE ----------------
-theme = st.sidebar.toggle("🌙 Dark Mode")
+# ---------------- LOGIN ----------------
+if "login" not in st.session_state:
+    st.session_state.login = False
 
-if theme:
+if not st.session_state.login:
+    st.title("🔐 Login")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if u == "admin" and p == "1234":
+            st.session_state.login = True
+        else:
+            st.error("Wrong credentials")
+    st.stop()
+
+# ---------------- API KEY ----------------
+api_key = st.sidebar.text_input("🔑 Enter OpenAI API Key", type="password")
+client = OpenAI(api_key=api_key) if api_key else None
+
+# ---------------- THEME ----------------
+dark = st.sidebar.toggle("🌙 Dark Mode")
+
+if dark:
     st.markdown("<style>body{background-color:#0E1117;color:white;}</style>", unsafe_allow_html=True)
 
-# ---------------- TITLE ----------------
-st.title("🚀 AI Resume Analyzer Pro+")
+st.title("🚀 AI Resume Analyzer Ultimate")
 
 # ---------------- SKILLS ----------------
 skills_list = [
@@ -50,31 +70,41 @@ def extract_name(text):
 def extract_skills(text):
     return list(set([s for s in skills_list if s in text]))
 
-# 🤖 Smart Score
-def smart_score(skills, match):
-    return min(int(len(skills)*4 + match*0.6), 100)
-
-# 🎯 Match + keywords
-def match_analysis(resume, jd):
+def match_score(resume, jd):
     cv = CountVectorizer()
     matrix = cv.fit_transform([resume, jd])
-    similarity = cosine_similarity(matrix)[0][1]
+    return round(cosine_similarity(matrix)[0][1]*100,2)
 
-    words = cv.get_feature_names_out()
-    jd_words = set(jd.split())
-    matched = [w for w in words if w in jd_words]
+def smart_score(skills, match):
+    return min(int(len(skills)*4 + match*0.6),100)
 
-    return round(similarity*100,2), matched
+# 🤖 AI Feedback
+def ai_feedback(text, jd):
+    if not client:
+        return "⚠️ Enter API key to get AI feedback"
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "You are a resume expert."},
+                {"role": "user", "content": f"Analyze this resume:\n{text}\n\nJob Description:\n{jd}\nGive improvements."}
+            ]
+        )
+        return response.choices[0].message.content
+    except:
+        return "API Error"
 
-# 📄 PDF Report
-def generate_pdf(name, email, score):
+# 📄 PDF
+def generate_pdf(name, email, score, feedback):
     doc = SimpleDocTemplate("report.pdf")
     styles = getSampleStyleSheet()
-    content = []
 
-    content.append(Paragraph(f"Name: {name}", styles["Normal"]))
-    content.append(Paragraph(f"Email: {email}", styles["Normal"]))
-    content.append(Paragraph(f"Score: {score}", styles["Normal"]))
+    content = [
+        Paragraph(f"Name: {name}", styles["Normal"]),
+        Paragraph(f"Email: {email}", styles["Normal"]),
+        Paragraph(f"Score: {score}", styles["Normal"]),
+        Paragraph(f"Feedback: {feedback}", styles["Normal"])
+    ]
 
     doc.build(content)
 
@@ -85,7 +115,7 @@ with col1:
     file = st.file_uploader("📄 Upload Resume", type=["pdf"])
 
 with col2:
-    jd = st.text_area("📝 Paste Job Description")
+    jd = st.text_area("📝 Job Description")
 
 # ---------------- PROCESS ----------------
 if file:
@@ -95,7 +125,7 @@ if file:
     email = extract_email(text)
     skills = extract_skills(text)
 
-    match, keywords = match_analysis(text, jd if jd else "")
+    match = match_score(text, jd if jd else "")
     score = smart_score(skills, match)
 
     # ---------------- METRICS ----------------
@@ -105,36 +135,21 @@ if file:
     c3.metric("💡 Skills", len(skills))
 
     # ---------------- INFO ----------------
-    st.subheader("👤 Candidate Info")
-    st.write("Name:", name)
-    st.write("Email:", email)
-
-    # ---------------- SKILLS ----------------
-    st.subheader("🛠 Skills Found")
-    st.write(skills)
+    st.subheader("👤 Info")
+    st.write(name, "|", email)
 
     # ---------------- CHART ----------------
-    st.subheader("📊 Skill Distribution")
     df = pd.DataFrame({"Skill": skills, "Value":[1]*len(skills)})
     fig = px.bar(df, x="Skill", y="Value")
     st.plotly_chart(fig)
 
-    # ---------------- MATCH ANALYSIS ----------------
-    st.subheader("🎯 Matching Keywords")
-    st.write(keywords[:20])
+    # ---------------- AI FEEDBACK ----------------
+    st.subheader("🤖 AI Suggestions")
+    feedback = ai_feedback(text, jd if jd else "")
+    st.write(feedback)
 
-    # ---------------- SUGGESTIONS ----------------
-    st.subheader("📌 Smart Suggestions")
+    # ---------------- PDF ----------------
+    generate_pdf(name, email, score, feedback)
 
-    if score < 50:
-        st.warning("Improve resume with more skills and projects")
-    if match < 50:
-        st.warning("Customize resume based on job description")
-    if "machine learning" not in skills:
-        st.info("Add Machine Learning skills")
-
-    # ---------------- PDF DOWNLOAD ----------------
-    generate_pdf(name, email, score)
-
-    with open("report.pdf", "rb") as f:
-        st.download_button("📄 Download PDF Report", f, "report.pdf")
+    with open("report.pdf","rb") as f:
+        st.download_button("📄 Download Full Report", f, "report.pdf")
