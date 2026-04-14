@@ -2,3 +2,9 @@ streamlit
 pdfplumber
 nltk
 scikit-learn
+pandas
+numpy
+matplotlib
+seaborn
+spacy
+
