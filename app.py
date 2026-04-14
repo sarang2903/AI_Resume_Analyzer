@@ -2,46 +2,23 @@ import streamlit as st
 import pdfplumber
 import re
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.express as px
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
 
-# ---------------- PAGE CONFIG ----------------
-st.set_page_config(page_title="AI Resume Analyzer", layout="wide")
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="AI Resume Analyzer Pro+", layout="wide")
 
-# ---------------- LOGIN SYSTEM ----------------
-if "login" not in st.session_state:
-    st.session_state.login = False
+# ---------------- THEME TOGGLE ----------------
+theme = st.sidebar.toggle("🌙 Dark Mode")
 
-def login():
-    st.title("🔐 Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+if theme:
+    st.markdown("<style>body{background-color:#0E1117;color:white;}</style>", unsafe_allow_html=True)
 
-    if st.button("Login"):
-        if username == "admin" and password == "1234":
-            st.session_state.login = True
-        else:
-            st.error("Invalid credentials")
-
-if not st.session_state.login:
-    login()
-    st.stop()
-
-# ---------------- UI STYLE ----------------
-st.markdown("""
-<style>
-.main {background-color: #f0f2f6;}
-.card {
-    padding: 20px;
-    border-radius: 15px;
-    background: white;
-    box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.title("🧠 AI Resume Analyzer Pro")
+# ---------------- TITLE ----------------
+st.title("🚀 AI Resume Analyzer Pro+")
 
 # ---------------- SKILLS ----------------
 skills_list = [
@@ -65,88 +42,99 @@ def extract_email(text):
 
 def extract_name(text):
     lines = text.split("\n")
-    return lines[0] if lines else "Not Found"
+    for line in lines:
+        if len(line.split()) <= 4:
+            return line
+    return "Not Found"
 
 def extract_skills(text):
     return list(set([s for s in skills_list if s in text]))
 
-def ats_score(text, skills):
-    score = len(skills) * 5
-    keywords = ["project","experience","education","skills"]
-    for k in keywords:
-        if k in text:
-            score += 5
-    return min(score,100)
+# 🤖 Smart Score
+def smart_score(skills, match):
+    return min(int(len(skills)*4 + match*0.6), 100)
 
-def match_score(resume, jd):
+# 🎯 Match + keywords
+def match_analysis(resume, jd):
     cv = CountVectorizer()
     matrix = cv.fit_transform([resume, jd])
-    return round(cosine_similarity(matrix)[0][1]*100,2)
+    similarity = cosine_similarity(matrix)[0][1]
+
+    words = cv.get_feature_names_out()
+    jd_words = set(jd.split())
+    matched = [w for w in words if w in jd_words]
+
+    return round(similarity*100,2), matched
+
+# 📄 PDF Report
+def generate_pdf(name, email, score):
+    doc = SimpleDocTemplate("report.pdf")
+    styles = getSampleStyleSheet()
+    content = []
+
+    content.append(Paragraph(f"Name: {name}", styles["Normal"]))
+    content.append(Paragraph(f"Email: {email}", styles["Normal"]))
+    content.append(Paragraph(f"Score: {score}", styles["Normal"]))
+
+    doc.build(content)
 
 # ---------------- INPUT ----------------
 col1, col2 = st.columns(2)
 
 with col1:
-    uploaded_file = st.file_uploader("📄 Upload Resume", type=["pdf"])
+    file = st.file_uploader("📄 Upload Resume", type=["pdf"])
 
 with col2:
-    jd = st.text_area("📝 Job Description")
+    jd = st.text_area("📝 Paste Job Description")
 
 # ---------------- PROCESS ----------------
-if uploaded_file:
-    text = extract_text(uploaded_file)
+if file:
+    text = extract_text(file)
 
-    # Extract info
-    email = extract_email(text)
     name = extract_name(text)
+    email = extract_email(text)
     skills = extract_skills(text)
-    score = ats_score(text, skills)
-    match = match_score(text, jd) if jd else 0
+
+    match, keywords = match_analysis(text, jd if jd else "")
+    score = smart_score(skills, match)
 
     # ---------------- METRICS ----------------
     c1, c2, c3 = st.columns(3)
-
-    c1.metric("📊 ATS Score", f"{score}/100")
+    c1.metric("🤖 AI Score", f"{score}/100")
     c2.metric("🎯 JD Match", f"{match}%")
     c3.metric("💡 Skills", len(skills))
 
-    # ---------------- BASIC INFO ----------------
+    # ---------------- INFO ----------------
     st.subheader("👤 Candidate Info")
-    st.write("**Name:**", name)
-    st.write("**Email:**", email)
+    st.write("Name:", name)
+    st.write("Email:", email)
 
     # ---------------- SKILLS ----------------
-    st.subheader("🛠 Skills")
+    st.subheader("🛠 Skills Found")
     st.write(skills)
 
     # ---------------- CHART ----------------
-    st.subheader("📊 Skills Visualization")
+    st.subheader("📊 Skill Distribution")
+    df = pd.DataFrame({"Skill": skills, "Value":[1]*len(skills)})
+    fig = px.bar(df, x="Skill", y="Value")
+    st.plotly_chart(fig)
 
-    skill_counts = [1]*len(skills)
-    plt.figure()
-    plt.bar(skills, skill_counts)
-    plt.xticks(rotation=45)
-
-    st.pyplot(plt)
+    # ---------------- MATCH ANALYSIS ----------------
+    st.subheader("🎯 Matching Keywords")
+    st.write(keywords[:20])
 
     # ---------------- SUGGESTIONS ----------------
-    st.subheader("📌 Suggestions")
+    st.subheader("📌 Smart Suggestions")
 
     if score < 50:
-        st.warning("Add more skills and projects.")
+        st.warning("Improve resume with more skills and projects")
+    if match < 50:
+        st.warning("Customize resume based on job description")
     if "machine learning" not in skills:
-        st.info("Add Machine Learning skills.")
-    if "communication" not in skills:
-        st.info("Add communication skills.")
+        st.info("Add Machine Learning skills")
 
-    # ---------------- DOWNLOAD ----------------
-    report = pd.DataFrame({
-        "Name":[name],
-        "Email":[email],
-        "ATS Score":[score],
-        "JD Match":[match],
-        "Skills":[", ".join(skills)]
-    })
+    # ---------------- PDF DOWNLOAD ----------------
+    generate_pdf(name, email, score)
 
-    csv = report.to_csv(index=False).encode()
-    st.download_button("⬇️ Download Report", csv, "resume_report.csv")
+    with open("report.pdf", "rb") as f:
+        st.download_button("📄 Download PDF Report", f, "report.pdf")
