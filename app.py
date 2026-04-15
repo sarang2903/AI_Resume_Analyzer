@@ -5,23 +5,16 @@ import pandas as pd
 import plotly.express as px
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 
 # ---------------- CONFIG ----------------
-st.set_page_config(page_title="AI Resume Analyzer Pro+", layout="wide")
+st.set_page_config(page_title="AI Career Assistant", layout="wide")
 
-# ---------------- THEME ----------------
-theme = st.sidebar.toggle("🌙 Dark Mode")
+st.title("🚀 AI Career Assistant Platform")
 
-if theme:
-    st.markdown("<style>body{background-color:#0E1117;color:white;}</style>", unsafe_allow_html=True)
-
-# ---------------- TITLE ----------------
-st.title("🚀 AI Resume Analyzer Pro+")
-
-# ---------------- SKILLS ----------------
-skills_list = [
+# ---------------- SKILLS DATABASE ----------------
+skills_db = [
     "python","java","c++","machine learning","data science","sql",
     "html","css","javascript","react","node","deep learning",
     "nlp","power bi","excel","communication","teamwork"
@@ -32,69 +25,78 @@ def extract_text(file):
     text = ""
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
-            if page.extract_text():
-                text += page.extract_text() + " "
+            text += page.extract_text() or ""
     return text.lower()
 
-# -------- CONTACT INFO --------
 def extract_email(text):
-    match = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+    match = re.findall(r"\S+@\S+", text)
     return match[0] if match else "Not Found"
 
 def extract_phone(text):
     match = re.findall(r"\+?\d[\d\s\-]{8,15}\d", text)
     return match[0] if match else "Not Found"
 
-def extract_linkedin(text):
-    match = re.findall(r"(https?://(?:www\.)?linkedin\.com/[^\s]+)", text)
-    return match[0] if match else "Not Found"
-
-def extract_github(text):
-    match = re.findall(r"(https?://(?:www\.)?github\.com/[^\s]+)", text)
-    return match[0] if match else "Not Found"
-
 def extract_name(text):
-    lines = text.split("\n")
-    for line in lines:
+    for line in text.split("\n"):
         if 2 <= len(line.split()) <= 4:
-            return line.strip()
+            return line
     return "Not Found"
 
-# -------- SKILLS --------
 def extract_skills(text):
-    return list(set([s for s in skills_list if s in text]))
+    return list(set([s for s in skills_db if s in text]))
 
-# -------- MATCH + AI SCORE --------
-def match_analysis(resume, jd):
+# -------- MATCH --------
+def match_score(resume, jd):
+    if not jd.strip():
+        return 0, [], []
+
     cv = CountVectorizer()
     matrix = cv.fit_transform([resume, jd])
     similarity = cosine_similarity(matrix)[0][1]
 
     words = cv.get_feature_names_out()
     jd_words = set(jd.split())
+
     matched = [w for w in words if w in jd_words]
+    missing = [w for w in jd_words if w not in words]
 
-    return round(similarity*100,2), matched
+    return round(similarity*100,2), matched, missing
 
-def smart_score(skills, match):
+# -------- SCORE --------
+def final_score(skills, match):
     return min(int(len(skills)*4 + match*0.6), 100)
 
-# -------- PDF REPORT --------
-def generate_pdf(name, email, phone, linkedin, github, score):
+# -------- CAREER SUGGESTION --------
+def suggest_career(skills):
+    if "machine learning" in skills:
+        return "Data Scientist / ML Engineer"
+    elif "react" in skills:
+        return "Frontend Developer"
+    elif "node" in skills:
+        return "Backend Developer"
+    elif "sql" in skills:
+        return "Data Analyst"
+    else:
+        return "Software Developer"
+
+# -------- PDF --------
+def generate_pdf(name, email, phone, score, career):
     doc = SimpleDocTemplate("report.pdf")
     styles = getSampleStyleSheet()
+
     content = []
+    content.append(Paragraph("<b>AI Career Report</b>", styles["Title"]))
+    content.append(Spacer(1,10))
 
     content.append(Paragraph(f"Name: {name}", styles["Normal"]))
     content.append(Paragraph(f"Email: {email}", styles["Normal"]))
     content.append(Paragraph(f"Phone: {phone}", styles["Normal"]))
-    content.append(Paragraph(f"LinkedIn: {linkedin}", styles["Normal"]))
-    content.append(Paragraph(f"GitHub: {github}", styles["Normal"]))
-    content.append(Paragraph(f"AI Score: {score}", styles["Normal"]))
+    content.append(Paragraph(f"Score: {score}", styles["Normal"]))
+    content.append(Paragraph(f"Suggested Career: {career}", styles["Normal"]))
 
     doc.build(content)
 
-# ---------------- INPUT ----------------
+# ---------------- UI ----------------
 col1, col2 = st.columns(2)
 
 with col1:
@@ -110,61 +112,55 @@ if file:
     name = extract_name(text)
     email = extract_email(text)
     phone = extract_phone(text)
-    linkedin = extract_linkedin(text)
-    github = extract_github(text)
 
     skills = extract_skills(text)
-    match, keywords = match_analysis(text, jd if jd else "")
-    score = smart_score(skills, match)
+    match, matched, missing = match_score(text, jd)
+    score = final_score(skills, match)
+    career = suggest_career(skills)
 
     # -------- METRICS --------
     c1, c2, c3 = st.columns(3)
-    c1.metric("🤖 AI Score", f"{score}/100")
-    c2.metric("🎯 JD Match", f"{match}%")
+    c1.metric("🤖 AI Score", score)
+    c2.metric("🎯 Match %", match)
     c3.metric("💡 Skills", len(skills))
 
-    # -------- CONTACT INFO --------
-    st.subheader("👤 Candidate Contact Information")
+    st.progress(score/100)
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.write("📛 **Name:**", name)
-        st.write("📧 **Email:**", email)
-        st.write("📱 **Phone:**", phone)
-
-    with col2:
-        st.write("🔗 **LinkedIn:**", linkedin)
-        st.write("💻 **GitHub:**", github)
+    # -------- INFO --------
+    st.subheader("👤 Candidate Info")
+    st.write(name, email, phone)
 
     # -------- SKILLS --------
-    st.subheader("🛠 Skills Found")
-    st.write(skills)
+    st.subheader("🛠 Skills")
+    st.success(skills)
 
     # -------- CHART --------
-    st.subheader("📊 Skill Distribution")
     df = pd.DataFrame({"Skill": skills, "Value":[1]*len(skills)})
-    fig = px.bar(df, x="Skill", y="Value")
+    fig = px.bar(df, x="Skill", y="Value", title="Skill Chart")
     st.plotly_chart(fig)
 
-    # -------- MATCH KEYWORDS --------
-    st.subheader("🎯 Matching Keywords")
-    st.write(keywords[:20])
+    # -------- MATCH --------
+    st.subheader("🎯 Matched Keywords")
+    st.write(matched[:15])
+
+    st.subheader("⚠️ Missing Skills")
+    st.error(missing[:15])
+
+    # -------- CAREER --------
+    st.subheader("🎓 Suggested Career")
+    st.success(career)
 
     # -------- SUGGESTIONS --------
-    st.subheader("📌 Smart Suggestions")
-
+    st.subheader("📌 Suggestions")
     if score < 50:
-        st.warning("Improve resume with more skills and projects")
-    if match < 50:
-        st.warning("Customize resume based on job description")
-    if "machine learning" not in skills:
-        st.info("Add Machine Learning skills")
-    if "communication" not in skills:
-        st.info("Add communication skills")
+        st.warning("Improve skills & projects")
+    elif score < 75:
+        st.info("Good resume, optimize keywords")
+    else:
+        st.success("Excellent resume")
 
-    # -------- PDF DOWNLOAD --------
-    generate_pdf(name, email, phone, linkedin, github, score)
+    # -------- PDF --------
+    generate_pdf(name, email, phone, score, career)
 
     with open("report.pdf", "rb") as f:
-        st.download_button("📄 Download PDF Report", f, "report.pdf")
+        st.download_button("📄 Download Report", f, "report.pdf")
