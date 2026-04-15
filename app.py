@@ -1,3 +1,151 @@
+import streamlit as st
+import pdfplumber
+import re
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="AI Resume Analyzer Pro+", layout="wide")
+
+# ---------------- UI STYLE ----------------
+st.markdown("""
+<style>
+.main { background: #f0f4ff; }
+.hero {
+    background: linear-gradient(135deg,#1e3a8a,#3b82f6);
+    padding:30px;
+    border-radius:15px;
+    color:white;
+}
+.card {
+    background:white;
+    padding:20px;
+    border-radius:15px;
+    box-shadow:0 5px 20px rgba(0,0,0,0.1);
+    margin-bottom:15px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------- SIDEBAR ----------------
+with st.sidebar:
+    st.title("🤖 Resume AI")
+    page = st.radio("Navigation", [
+        "📄 Resume Analyzer",
+        "📊 Analytics Dashboard",
+        "📌 Skill Insights",
+        "ℹ️ About"
+    ])
+
+# ---------------- SKILLS ----------------
+skills_list = [
+    "python","java","c++","machine learning","data science","sql",
+    "html","css","javascript","react","node","deep learning",
+    "nlp","power bi","excel","communication","teamwork"
+]
+
+# ---------------- FUNCTIONS ----------------
+def extract_text(file):
+    text = ""
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            if page.extract_text():
+                text += page.extract_text() + " "
+    return text.lower()
+
+def extract_email(text):
+    match = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
+    return match[0] if match else "Not Found"
+
+def extract_phone(text):
+    match = re.findall(r"\+?\d[\d\s\-]{8,15}\d", text)
+    return match[0] if match else "Not Found"
+
+def extract_name(text):
+    lines = text.split("\n")
+    for line in lines:
+        if 2 <= len(line.split()) <= 4:
+            return line.strip()
+    return "Not Found"
+
+def extract_skills(text):
+    return list(set([s for s in skills_list if s in text]))
+
+def match_analysis(resume, jd):
+    if not jd.strip():
+        return 0, [], []
+
+    cv = CountVectorizer()
+    matrix = cv.fit_transform([resume, jd])
+    similarity = cosine_similarity(matrix)[0][1]
+
+    words = cv.get_feature_names_out()
+    jd_words = set(jd.split())
+
+    matched = [w for w in words if w in jd_words]
+    missing = [w for w in jd_words if w not in words]
+
+    return round(similarity*100,2), matched, missing
+
+# ---------------- SESSION ----------------
+if "data" not in st.session_state:
+    st.session_state.data = {}
+
+# ---------------- PAGE 1 ----------------
+if page == "📄 Resume Analyzer":
+
+    st.markdown('<div class="hero"><h1>🚀 AI Resume Analyzer</h1><p>Analyze your resume with AI insights</p></div>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        file = st.file_uploader("Upload Resume (PDF)")
+
+    with col2:
+        jd = st.text_area("Paste Job Description")
+
+    if file:
+        text = extract_text(file)
+
+        name = extract_name(text)
+        email = extract_email(text)
+        phone = extract_phone(text)
+        skills = extract_skills(text)
+        match, keywords, missing = match_analysis(text, jd)
+
+        score = min(int(len(skills)*4 + match*0.6), 100)
+
+        st.session_state.data = {
+            "name": name,
+            "email": email,
+            "phone": phone,
+            "skills": skills,
+            "match": match,
+            "score": score,
+            "keywords": keywords,
+            "missing": missing
+        }
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("AI Score", f"{score}/100")
+        c2.metric("JD Match", f"{match}%")
+        c3.metric("Skills", len(skills))
+
+        st.progress(score/100)
+
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("👤 Contact Info")
+        st.write("Name:", name)
+        st.write("Email:", email)
+        st.write("Phone:", phone)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------------- PAGE 2 ----------------
 elif page == "📊 Analytics Dashboard":
 
     st.markdown('<div class="hero"><h1>📊 Advanced Resume Analytics</h1></div>', unsafe_allow_html=True)
@@ -9,81 +157,97 @@ elif page == "📊 Analytics Dashboard":
     else:
         skills = data["skills"]
         score = data["score"]
-        match = data["match"]
 
-        # -------- SIDEBAR FILTER --------
-        selected_skills = st.sidebar.multiselect(
-            "Filter Skills",
-            skills,
-            default=skills
-        )
+        selected_skills = st.sidebar.multiselect("Filter Skills", skills, default=skills)
 
         df = pd.DataFrame({
             "Skill": selected_skills,
             "Value": np.random.randint(1, 5, len(selected_skills))
         })
 
-        # -------- SUBPLOTS --------
         fig = make_subplots(
             rows=2, cols=2,
-            specs=[
-                [{"type": "bar"}, {"type": "pie"}],
-                [{"type": "polar"}, {"type": "indicator"}]
-            ],
-            subplot_titles=(
-                "Skill Distribution",
-                "Skill Share",
-                "Skill Radar",
-                "AI Score"
-            )
+            specs=[[{"type": "bar"}, {"type": "pie"}],
+                   [{"type": "polar"}, {"type": "indicator"}]],
+            subplot_titles=("Skill Distribution","Skill Share","Skill Radar","AI Score")
         )
 
-        # BAR
-        fig.add_trace(
-            go.Bar(x=df["Skill"], y=df["Value"]),
-            row=1, col=1
-        )
-
-        # PIE
-        fig.add_trace(
-            go.Pie(labels=df["Skill"], values=df["Value"]),
-            row=1, col=2
-        )
-
-        # RADAR
-        fig.add_trace(
-            go.Scatterpolar(
-                r=df["Value"],
-                theta=df["Skill"],
-                fill='toself'
-            ),
-            row=2, col=1
-        )
-
-        # GAUGE
-        fig.add_trace(
-            go.Indicator(
-                mode="gauge+number",
-                value=score,
-                title={"text": "AI Score"},
-                gauge={"axis": {"range": [0, 100]}}
-            ),
-            row=2, col=2
-        )
+        fig.add_trace(go.Bar(x=df["Skill"], y=df["Value"]), row=1, col=1)
+        fig.add_trace(go.Pie(labels=df["Skill"], values=df["Value"]), row=1, col=2)
+        fig.add_trace(go.Scatterpolar(r=df["Value"], theta=df["Skill"], fill='toself'), row=2, col=1)
+        fig.add_trace(go.Indicator(mode="gauge+number", value=score,
+                                  gauge={"axis": {"range": [0, 100]}}), row=2, col=2)
 
         fig.update_layout(height=700, template="plotly_dark")
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # -------- TREND --------
-        st.subheader("📈 Resume Growth Simulation")
-
+        # Trend
+        st.subheader("📈 Growth Trend")
         trend = np.cumsum(np.random.randint(-2, 5, 10)) + score
+        st.plotly_chart(go.Figure(data=go.Scatter(y=trend, mode='lines+markers')))
 
-        trend_fig = go.Figure()
-        trend_fig.add_trace(go.Scatter(
-            y=trend,
-            mode='lines+markers'
-        ))
+# ---------------- PAGE 3 ----------------
+elif page == "📌 Skill Insights":
 
-        st.plotly_chart(trend_fig, use_container_width=True)
+    st.markdown('<div class="hero"><h1>📌 AI Skill Insights</h1></div>', unsafe_allow_html=True)
+
+    data = st.session_state.data
+
+    if not data:
+        st.warning("Upload resume first")
+    else:
+        skills = data["skills"]
+        missing = data["missing"]
+        score = data["score"]
+        match = data["match"]
+
+        search = st.text_input("🔍 Search Skill")
+
+        filtered = [s for s in skills if search.lower() in s] if search else skills
+
+        st.subheader("✅ Matching Skills")
+        st.success(", ".join(filtered) if filtered else "None")
+
+        st.subheader("❌ Missing Skills")
+        st.error(", ".join(missing[:15]) if missing else "None 🎉")
+
+        # Heatmap
+        st.subheader("🌡 Heatmap")
+        heat = np.random.rand(len(skills), len(skills))
+        st.plotly_chart(go.Figure(data=go.Heatmap(z=heat, x=skills, y=skills)))
+
+        # Insights
+        st.subheader("🤖 AI Insights")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.success("Good Resume" if score > 50 else "Improve Resume")
+
+        with col2:
+            st.success("Good Match" if match > 50 else "Low Match")
+
+        with col3:
+            st.success("Strong Profile" if len(missing) < 5 else "Upskill Needed")
+
+# ---------------- PAGE 4 ----------------
+elif page == "ℹ️ About":
+
+    st.markdown('<div class="hero"><h1>ℹ️ About</h1></div>', unsafe_allow_html=True)
+
+    st.write("""
+    🚀 AI Resume Analyzer Pro+
+
+    Features:
+    - Resume parsing
+    - Skill extraction
+    - JD matching
+    - Interactive analytics dashboard
+
+    Built using:
+    - Streamlit
+    - Plotly
+    - NLP (Sklearn)
+
+    Final Year Project Level 🔥
+    """)
